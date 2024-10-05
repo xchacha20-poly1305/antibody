@@ -1,14 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"os"
-	"os/signal"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/XinRoom/iprange"
@@ -16,19 +16,22 @@ import (
 
 const (
 	ModeAnchor = "anchor"
+	ModeClash  = "clash"
 )
 
 var (
-	mode      string
-	rawIP     string
-	timeout   time.Duration
-	threads   int
-	debugMode bool
+	mode           string
+	rawIP          string
+	tcpScanTimeout time.Duration
+	timeout        time.Duration
+	threads        int
+	debugMode      bool
 )
 
 func main() {
-	flag.StringVar(&mode, "m", ModeAnchor, "Scan mode. Support: anchor")
+	flag.StringVar(&mode, "m", ModeAnchor, "Scan mode. Support: anchor, clash")
 	flag.StringVar(&rawIP, "i", "192.168.0.0/16", "The CIDR you want to scan. Split by \",\"")
+	flag.DurationVar(&tcpScanTimeout, "tt", 500*time.Second, "TCP scan timeout")
 	flag.DurationVar(&timeout, "t", 3*time.Second, "Timeout")
 	flag.IntVar(&threads, "x", runtime.NumCPU()*8, "Threads.")
 	flag.BoolVar(&debugMode, "d", false, "Debug mode")
@@ -44,12 +47,28 @@ func main() {
 		iters = append(iters, iter)
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var groupCtx context.Context
 	switch mode {
 	case ModeAnchor:
 		groupCtx = scanAnchor(ctx, iters)
+	case ModeClash:
+		var targets []WithPorts
+		for _, iter := range iters {
+			for i := uint64(0); i < iter.TotalNum(); i++ {
+				ip := net.IP(bytes.Clone(iter.GetIpByIndex(i)))
+				ports := scanTcp(ctx, ip.String())
+				if len(ports) == 0 {
+					continue
+				}
+				targets = append(targets, WithPorts{
+					ip:    ip,
+					ports: ports,
+				})
+			}
+		}
+		groupCtx = scanClash(ctx, targets)
 	default:
 		fatal("Unknown mode: %s\v", mode)
 	}
