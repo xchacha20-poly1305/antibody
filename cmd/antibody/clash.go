@@ -15,42 +15,39 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func scanClash(ctx context.Context, targets []WithPorts) context.Context {
+func scanClash(ctx context.Context, targets []WithPorts) {
 	pool := sync.Pool{
 		New: func() any {
 			return &http.Client{}
 		},
 	}
 
-	group, groupCtx := errgroup.WithContext(ctx)
+	group, _ := errgroup.WithContext(ctx)
 	group.SetLimit(threads)
-	go func() {
-		for _, target := range targets {
-			ipString := target.ip.String()
-			for _, port := range target.ports {
-				port := port
-				group.Go(func() error {
-					client := pool.Get().(*http.Client)
-					defer pool.Put(client)
-					probeCtx, cancelProbe := context.WithTimeout(ctx, timeout)
-					host := net.JoinHostPort(ipString, F.ToString(port))
-					info, err := antibody.ProbeClash(probeCtx, client, &url.URL{
-						Scheme: "http",
-						Host:   host,
-					})
-					cancelProbe()
-					if err != nil {
-						if debugMode && !E.IsClosedOrCanceled(err) {
-							fmt.Fprintf(os.Stderr, "[%s] is not clash API: %v\n", host, err)
-						}
-						return nil
-					}
-					fmt.Printf("[%s] is clash: %+v\n", host, info)
-					return nil
+	for _, target := range targets {
+		ipString := target.ip.String()
+		for _, port := range target.ports {
+			port := port
+			group.Go(func() error {
+				client := pool.Get().(*http.Client)
+				defer pool.Put(client)
+				probeCtx, cancelProbe := context.WithTimeout(ctx, timeout)
+				host := net.JoinHostPort(ipString, F.ToString(port))
+				info, err := antibody.ProbeClash(probeCtx, client, &url.URL{
+					Scheme: "http",
+					Host:   host,
 				})
-			}
+				cancelProbe()
+				if err != nil {
+					if debugMode && !E.IsClosedOrCanceled(err) {
+						fmt.Fprintf(os.Stderr, "[%s] is not clash API: %v\n", host, err)
+					}
+					return nil
+				}
+				fmt.Printf("[%s] is clash: %+v\n", host, info)
+				return nil
+			})
 		}
-		_ = group.Wait()
-	}()
-	return groupCtx
+	}
+	_ = group.Wait()
 }

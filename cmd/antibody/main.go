@@ -47,18 +47,15 @@ func main() {
 		iters = append(iters, iter)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var groupCtx context.Context
 	switch mode {
 	case ModeAnchor:
-		groupCtx = scanAnchor(ctx, iters)
+		scanAnchor(context.Background(), iters)
 	case ModeClash:
 		var targets []WithPorts
 		for _, iter := range iters {
 			for i := uint64(0); i < iter.TotalNum(); i++ {
 				ip := net.IP(bytes.Clone(iter.GetIpByIndex(i)))
-				ports := scanTcp(ctx, ip.String())
+				ports := scanTcp(context.Background(), ip.String())
 				if len(ports) == 0 {
 					continue
 				}
@@ -68,15 +65,9 @@ func main() {
 				})
 			}
 		}
-		groupCtx = scanClash(ctx, targets)
+		scanClash(context.Background(), targets)
 	default:
 		fatal("Unknown mode: %s\v", mode)
-	}
-	select {
-	case <-ctx.Done():
-		return
-	case <-groupCtx.Done():
-		cancel()
 	}
 }
 
